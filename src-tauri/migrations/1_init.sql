@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS sales (
+    id TEXT PRIMARY KEY,
+    date TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    memo TEXT,
+    timestamp INTEGER NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);

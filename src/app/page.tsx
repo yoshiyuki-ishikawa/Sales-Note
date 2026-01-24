@@ -4,15 +4,11 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { Dashboard } from "@/components/Dashboard";
 import { SalesInput } from "@/components/SalesInput";
 import { SalesSheet } from "@/components/SalesSheet";
+import { StatusBar } from "@/components/StatusBar";
+import { Toast } from "@/components/Toast";
 import { downloadSalesAsCsv } from "@/lib/export";
-
-type Sale = {
-  id: string;
-  date: string; // YYYY-MM-DD
-  amount: number;
-  memo: string;
-  timestamp: number;
-};
+import { Sale } from "@/lib/types";
+import { salesRepository } from "@/lib/repositories/salesRepository";
 
 type Period = "daily" | "monthly";
 
@@ -21,31 +17,42 @@ export default function Home() {
   const [period, setPeriod] = useState<Period>("daily");
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [lastBackupTime, setLastBackupTime] = useState<string | undefined>(undefined);
+  const [toast, setToast] = useState<{ msg: string; show: boolean; type: 'success' | 'error' }>({ msg: '', show: false, type: 'success' });
   const [isPending, startTransition] = useTransition();
 
-  // Load from LocalStorage
+  const [error, setError] = useState<string | null>(null);
+
+  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+    setToast({ msg, show: true, type });
+  };
+
+  // Load from SQLite
   useEffect(() => {
-    const saved = localStorage.getItem("sales_note_data");
-    if (saved) {
+    const loadData = async () => {
       try {
-        setSales(JSON.parse(saved));
-        console.log("Loaded sales:", JSON.parse(saved).length);
+        // 5秒のタイムアウトを設定
+        const timeoutPromise = new Promise<Sale[]>((_, reject) =>
+          setTimeout(() => reject(new Error("Loading timeout")), 5000)
+        );
+
+        const data = await Promise.race([
+          salesRepository.getAll(),
+          timeoutPromise
+        ]);
+
+        setSales(data);
       } catch (e) {
         console.error("Failed to load data", e);
+        setError("データの読み込みに失敗しました。");
+      } finally {
+        setIsLoaded(true);
       }
-    }
-    setIsLoaded(true);
+    };
+    loadData();
   }, []);
 
-  // Save to LocalStorage
-  useEffect(() => {
-    if (isLoaded) {
-      localStorage.setItem("sales_note_data", JSON.stringify(sales));
-    }
-  }, [sales, isLoaded]);
-
   const handleSave = async (data: { date: string; amount: number; memo: string }) => {
-    // Generate ID without crypto.randomUUID for better mobile compatibility
     const safeId = Date.now().toString(36) + Math.random().toString(36).substring(2);
 
     const newSale: Sale = {
@@ -54,32 +61,58 @@ export default function Home() {
       timestamp: Date.now(),
     };
 
-    // Use transition to prioritize Input UI response over Dashboard update
-    startTransition(() => {
-      setSales((prev) => [newSale, ...prev]);
-    });
+    try {
+      const backupTime = await salesRepository.save(newSale);
+      setLastBackupTime(backupTime);
+      const latest = await salesRepository.getAll();
+      startTransition(() => {
+        setSales(latest);
+      });
+      showToast("保存完了 (Saved & Backed up)");
+    } catch (e) {
+      console.error("Failed to save", e);
+      showToast("保存に失敗しました", "error");
+    }
   };
 
-  const handleUpdate = (id: string, updates: Partial<Sale>) => {
-    startTransition(() => {
-      setSales((prev) => prev.map(s => s.id === id ? { ...s, ...updates } : s));
-    });
+  const handleUpdate = async (id: string, updates: Partial<Sale>) => {
+    const current = sales.find(s => s.id === id);
+    if (!current) return;
+
+    const updatedSale = { ...current, ...updates };
+
+    try {
+      const backupTime = await salesRepository.update(updatedSale);
+      setLastBackupTime(backupTime);
+      const latest = await salesRepository.getAll();
+      startTransition(() => {
+        setSales(latest);
+      });
+      showToast("更新完了");
+    } catch (e) {
+      console.error("Failed to update", e);
+      showToast("更新に失敗しました", "error");
+    }
   };
 
-  const handleDelete = (id: string) => {
-    startTransition(() => {
-      setSales((prev) => prev.filter(s => s.id !== id));
-    });
+  const handleDelete = async (id: string) => {
+    try {
+      const backupTime = await salesRepository.delete(id);
+      setLastBackupTime(backupTime);
+      const latest = await salesRepository.getAll();
+      startTransition(() => {
+        setSales(latest);
+      });
+      showToast("削除完了");
+    } catch (e) {
+      console.error("Failed to delete", e);
+      showToast("削除に失敗しました", "error");
+    }
   };
 
+  // ... (DayClick and Aggregation logic unchanged) ...
   const handleDayClick = (key: string) => {
-    // If period is monthly, key is "YYYY-MM". We can't show daily sheet easily from monthly view?
-    // Spec says "Day Detail". 
-    // If monthly view, clicking a bar (month) -> maybe nothing for now, or expand?
-    // Let's support only Daily view details for now, or ensure key is YYYY-MM-DD.
-    // In monthly view, key is YYYY-MM. 
-    // Let's only open sheet if looking at daily view or if key is full date.
-    if (key.length >= 10) { // Simple check for YYYY-MM-DD
+    if (key.length >= 10) {
       setSelectedDate(key);
     }
   };
@@ -158,6 +191,24 @@ export default function Home() {
     }
   };
 
+  if (error) {
+    return (
+      <div className="flex flex-col justify-center items-center h-screen gap-4 px-4 text-center">
+        <div className="text-destructive text-4xl mb-2">⚠️</div>
+        <p className="text-destructive font-bold text-lg">{error}</p>
+        <p className="text-muted-foreground text-sm">
+          データベースの読み込みに時間がかかっているか、エラーが発生しました。
+        </p>
+        <button
+          onClick={() => window.location.reload()}
+          className="px-6 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:opacity-90 transition-opacity"
+        >
+          再読み込み
+        </button>
+      </div>
+    );
+  }
+
   if (!isLoaded) {
     return (
       <div className="flex justify-center items-center h-screen">
@@ -197,20 +248,17 @@ export default function Home() {
       {/* Input Section */}
       <SalesInput onSave={handleSave} />
 
-      {/* Spacer to push footer to bottom */}
+      {/* App Footer (Status Bar) */}
       <div className="mt-auto" />
+      <StatusBar lastBackupTime={lastBackupTime} />
 
-      {/* App Footer */}
-      <footer className="py-6 text-center space-y-2 opacity-80">
-        <p className="text-[10px] text-muted-foreground flex items-center justify-center gap-1.5">
-          <span>🔒</span>
-          <span>データはこのブラウザ内に保存されます</span>
-        </p>
-        <p className="text-[10px] text-muted-foreground flex items-center justify-center gap-1.5">
-          <span>📥</span>
-          <span>CSVでいつでもダウンロードできます</span>
-        </p>
-      </footer>
+      {/* Toast */}
+      <Toast
+        message={toast.msg}
+        isVisible={toast.show}
+        onClose={() => setToast(prev => ({ ...prev, show: false }))}
+        type={toast.type}
+      />
 
       {/* Detail Sheet */}
       <SalesSheet

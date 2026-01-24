@@ -1,0 +1,28 @@
+:root {
+  /* Color Palette */
+  --color-bg: #F9F9F7;      /* Washy White */
+  --color-text: #3E403F;    /* Sumi Ink */
+  --color-accent: #8A9A95;  /* Sage Mist */
+  
+  /* Typography */
+  --font-main: "Noto Sans JP", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-concept: "Shippori Mincho", "Times New Roman", serif;
+  
+  --line-height-relaxed: 2.0;
+  --letter-spacing-wide: 0.05em;
+
+  /* Spacing */
+  --space-hero: 120px;
+  --space-section: 80px;
+
+  /* Animation Timings */
+  --duration-slow: 1200ms;
+  --ease-breath: cubic-bezier(0.2, 0.8, 0.2, 1.0);
+}
+
+@media (min-width: 768px) {
+  :root {
+    --space-hero: 160px;
+    --space-section: 120px;
+  }
+}

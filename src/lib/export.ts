@@ -1,10 +1,4 @@
-type Sale = {
-    id: string;
-    date: string;
-    amount: number;
-    memo: string;
-    timestamp: number;
-};
+import { Sale } from "./types";
 
 export function downloadSalesAsCsv(sales: Sale[]) {
     // 1. Sort by timestamp (descending: newest first)
